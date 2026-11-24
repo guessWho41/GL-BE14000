@@ -38,7 +38,7 @@ on:
       config_file:
         description: "Config file to build with"
         required: false
-        default: mt6000.config
+        default: be14000.config
         type: choice
         options:
           - be14000.config
@@ -359,7 +359,13 @@ jobs:
 
       - name: Commit build artifacts
         run: |
-          mv -v bin/* builder_repo/
+          if [ -d bin/targets ]; then
+            ls bin/targets
+            mkdir -p "builder_repo/$RELEASE_TAG"
+            mv -v bin/* "builder_repo/$RELEASE_TAG/"
+          else
+            mv -v bin/* builder_repo/
+          fi
           cd builder_repo
           git add .
           git diff --cached --quiet || git commit -m "$RELEASE_TAG"
