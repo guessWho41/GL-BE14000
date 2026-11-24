@@ -75,7 +75,7 @@ jobs:
             exit 1
           fi
           if [ -z "$remote_branch" ]; then
-            remote_branch=$(git ls-remote "https://github.com/${{ env.REMOTE_REPOSITORY }}.git" "refs/heads/*" | sed -e 's|\(.*heads/\)||' | sort -V | tail -n1)
+            remote_branch=$(git ls-remote --symref "https://github.com/${{ env.REMOTE_REPOSITORY }}.git" HEAD | sed -n 's|^ref: refs/heads/\(.*\)\tHEAD$|\1|p')
             if [ -z "$remote_branch" ]; then
               echo "*** Could not determine remote_branch ***"
               exit 1
@@ -331,6 +331,7 @@ jobs:
             ccache -s
             echo "=== ccache stats ==="
           fi
+          ls -la bin/targets/mediatek/filogic/
           if [ -d ./release ]; then
             rm -rfv ./release/*
           else
@@ -343,7 +344,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: gl-mt6000-firmware
+          name: gl-be18000-firmware
           path: release/*
 
       - name: Get release info
@@ -376,22 +377,6 @@ jobs:
           **Branch:** [${REMOTE_BRANCH}](https://github.com/${REMOTE_REPOSITORY}/tree/${REMOTE_BRANCH})
           **Commit:** [${LATEST_COMMIT}](https://github.com/${REMOTE_REPOSITORY}/commit/${LATEST_COMMIT})
           EOF
-          #### 🔄 Main Repository
-          #- **Repository:** [${REMOTE_REPOSITORY}](https://github.com/${REMOTE_REPOSITORY})
-          #- **Branch:** ${REMOTE_BRANCH}
-          #- **Commit:** ${LATEST_COMMIT}
-          #
-          #### 📝 Build Information
-          #- **Target:** [GL.iNet Flint 2 (GL-MT6000)](https://openwrt.org/toh/gl.inet/gl-mt6000)
-          #- **Configuration:** [${{ inputs.config_file }}](https://github.com/$TARGET_REPOSITORY/blob/main/config/${{ inputs.config_file }})
-          #EOF
-          #package_list=$(sed -n '/<!-- package-list-start -->/,/<!-- package-list-end -->/{ /<!--/d; p }' builder_repo/README.md)
-          #if [ -z "$package_list" ]; then
-          #  echo "WARNING: package list section not found in README.md"
-          #  echo "- *package list not found in README.md*" >> release_notes.md
-          #else
-          #  echo "$package_list" >> release_notes.md
-          #fi
           gh release create "$RELEASE_TAG" --repo "$TARGET_REPOSITORY" --latest --title "$RELEASE_TAG" --notes-file release_notes.md release/*
 
       - name: Clean up old builds
