@@ -41,8 +41,8 @@ on:
         default: mt6000.config
         type: choice
         options:
-          - mt6000.config
-          - mt6000_testing.config
+          - be14000.config
+          - be14000_testing.config
       testing_kernel:
         description: "Build with testing kernel"
         required: false
