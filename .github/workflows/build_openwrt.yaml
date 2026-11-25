@@ -331,7 +331,6 @@ jobs:
             ccache -s
             echo "=== ccache stats ==="
           fi
-          ls -la bin/targets/mediatek/filogic/
           if [ -d ./release ]; then
             rm -rfv ./release/*
           else
@@ -359,13 +358,8 @@ jobs:
 
       - name: Commit build artifacts
         run: |
-          if [ -d bin/targets ]; then
-            ls bin/targets
-            mkdir -p "builder_repo/$RELEASE_TAG"
-            mv -v bin/* "builder_repo/$RELEASE_TAG/"
-          else
-            mv -v bin/* builder_repo/
-          fi
+          mkdir -p "builder_repo/$RELEASE_TAG"
+          mv -v bin/* "builder_repo/$RELEASE_TAG/"
           cd builder_repo
           git add .
           git diff --cached --quiet || git commit -m "$RELEASE_TAG"
