@@ -10,6 +10,7 @@ Repository for building custom [OpenWrt](https://github.com/openwrt/openwrt) for
 - Bridger
 - Dynamic DNS Client
 - dnsproxy with [luci-app-dnsproxy](https://github.com/muink/luci-app-dnsproxy) by [muink](https://github.com/muink)
+- Irqbalance
 - mwan3 [nftables port](https://github.com/dl12345/mwan3) by [dl12345](https://forum.openwrt.org/u/dl12345)
 - qosify
 - TCP BBR
