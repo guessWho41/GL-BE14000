@@ -276,6 +276,8 @@ jobs:
 
       - name: Setup configuration and custom files
         run: |
+          RELEASE_TAG="$(date +%F)_$(./scripts/getver.sh)_${{ needs.check_commits.outputs.remote_branch }}"
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
           cp -fv "builder_repo/config/${{ inputs.config_file }}" .config
           set_kconfig() {
             local sym="$1" val="${2-}"
@@ -286,8 +288,6 @@ jobs:
               echo "${sym}=y" >> .config
             fi
           }
-          RELEASE_TAG="$(date +%F)_$(./scripts/getver.sh)_${{ needs.check_commits.outputs.remote_branch }}"
-          echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
           set_kconfig CONFIG_VERSION_REPO "https://raw.githubusercontent.com/${{ github.repository }}/refs/heads/main/${RELEASE_TAG}"
           if [ "${{ inputs.use_ccache }}" = "true" ]; then
             if command -v ccache >/dev/null 2>&1; then
