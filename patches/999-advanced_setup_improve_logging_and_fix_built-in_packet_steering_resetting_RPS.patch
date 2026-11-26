@@ -260,7 +260,7 @@
  }
  
  MT7622()
-@@ -553,36 +563,36 @@
+@@ -553,39 +563,36 @@
  		CPU1_RPS="$RPS_IF_LIST"
  	fi
  
@@ -305,11 +305,14 @@
  		MT7622 $num_of_wifi
  	elif [[ $board == *"bpi-r4"* ]]; then
 -		logger -s "smp_affinity: setup_model: bpi-r4 NUM_WIFI_CARD=$num_of_wifi"
+-		MT7988 $num_of_wifi
+-	elif [[ $board == *"gl-be14000"* ]]; then
+-		logger -s "smp_affinity: setup_model: gl-be14000 NUM_WIFI_CARD=$num_of_wifi"
 +		log_msg "[smp_affinity] Board model is BPI-R4, WLAN radio count is $num_of_wifi"
  		MT7988 $num_of_wifi
  	fi
  }
-@@ -603,25 +613,26 @@
+@@ -606,25 +613,26 @@
  
  set_rps_cpu_bitmap()
  {
@@ -340,7 +343,7 @@
  		done
  		num=`expr $num + 1`
  	done
-@@ -630,7 +641,7 @@
+@@ -633,7 +641,7 @@
  # $1: The default rps value. If rps of the interface is not setup, set $1 to it
  set_rps_cpus()
  {
@@ -349,7 +352,7 @@
  	for i in $RPS_IF_LIST; do
  		var=${VAR_PREFIX}_${i//'-'/_}
  		var=${var//'.'/_}
-@@ -645,7 +656,7 @@
+@@ -648,7 +656,7 @@
  			if [ -n "$cpu_map" ]; then
  				for rxq in /sys/class/net/$i/queues/rx-*; do
  					[ -d "$rxq" ] || continue
@@ -358,7 +361,7 @@
  					echo $cpu_map > "$rxq/rps_cpus"
  				done
  			fi
-@@ -655,7 +666,7 @@
+@@ -658,7 +666,7 @@
  
  set_smp_affinity()
  {
@@ -367,7 +370,7 @@
  	num=0
  	while [ "$num" -lt "$NUM_OF_CPU" ];do
  		eval smp_list=\$CPU${num}_AFFINITY
-@@ -663,22 +674,21 @@
+@@ -666,22 +674,21 @@
  			cpu_bit=$((2 ** $num))
  			virq=$(get_virtual_irq $i)
  			if [ -z "$virq" ]; then
@@ -395,7 +398,7 @@
  VAR_PREFIX="autogen"
  get_if_info
  setup_model
-@@ -693,14 +703,13 @@
+@@ -696,14 +703,13 @@
  		set_rps_cpu_bitmap
  		set_rps_cpus $DEFAULT_RPS
  	else
@@ -412,7 +415,7 @@
  set_smp_affinity
  #end of file
  }
-@@ -709,7 +718,7 @@
+@@ -712,7 +718,7 @@
  {
  	mtk_offloading_enable=$(uci get advanced.@defaults[0].mtk_offloading_enable 2>/dev/null || echo "x")
  	if [ "$mtk_offloading_enable" == "1" ]; then
@@ -421,7 +424,7 @@
  			#TCP Binding
  			iptables -I FORWARD -p tcp -m conntrack --ctstate RELATED,ESTABLISHED -j FLOWOFFLOAD --hw
  			ip6tables -I FORWARD -p tcp -m conntrack --ctstate RELATED,ESTABLISHED -j FLOWOFFLOAD --hw
-@@ -720,7 +729,7 @@
+@@ -723,7 +729,7 @@
  			iptables -I FORWARD -m pkttype --pkt-type multicast -j ACCEPT
  			ip6tables -I FORWARD -m pkttype --pkt-type multicast -j ACCEPT
  	elif [ "$mtk_offloading_enable" == 0 ]; then
@@ -430,7 +433,7 @@
  			#TCP Binding
  			iptables -D FORWARD -p tcp -m conntrack --ctstate RELATED,ESTABLISHED -j FLOWOFFLOAD --hw
  			ip6tables -D FORWARD -p tcp -m conntrack --ctstate RELATED,ESTABLISHED -j FLOWOFFLOAD --hw
-@@ -815,7 +824,7 @@
+@@ -818,7 +824,7 @@
  
  		if [ "$old_content" != "$new_line" ]; then
  			printf '%s\n' "$new_line" > "$MODULE_FILE"
@@ -439,7 +442,7 @@
  			echo "0"
  			return 0
  		fi
-@@ -825,7 +834,7 @@
+@@ -828,7 +834,7 @@
  		runtime_wed=$(cat /sys/module/mt7915e/parameters/wed_enable 2>/dev/null)
  		if { [ "$wed" = "1" ] && [ "$runtime_wed" != "Y" ]; } || \
  		   { [ "$wed" = "0" ] && [ "$runtime_wed" != "N" ]; }; then
@@ -448,7 +451,7 @@
  			echo "0"
  			return 0
  		fi
-@@ -869,7 +878,7 @@
+@@ -872,7 +878,7 @@
  
  		if [ "$old_content" != "$new_line" ]; then
  			printf '%s\n' "$new_line" > "$MODULE_FILE"
@@ -457,7 +460,7 @@
  		fi
  	fi
  
-@@ -923,7 +932,7 @@
+@@ -926,7 +932,7 @@
  
  		if [ "$old_content" != "$new_line" ]; then
  			printf '%s\n' "$new_line" > "$MODULE_FILE"
@@ -466,7 +469,7 @@
  		fi
  	fi
  }
-@@ -935,7 +944,6 @@
+@@ -938,7 +944,6 @@
  
  	wed_changed=$(sync_mt7915e_wed_module_options)
  	atf_changed=$(sync_mt7915e_airtime_module_options)
@@ -474,7 +477,7 @@
  
  	if [ "$wed_changed" = "1" ] || [ "$atf_changed" = "1" ]; then
  		echo "1"
-@@ -963,7 +971,7 @@
+@@ -966,7 +971,7 @@
  	for FILE in /sys/kernel/debug/ieee80211/*/mt76/vow_atf; do
  		[ -e "$FILE" ] || continue
  		found=1
@@ -483,7 +486,7 @@
  		printf '%s\n' "$atf" > "$FILE"
  	done
  
-@@ -1022,11 +1030,10 @@
+@@ -1025,11 +1030,10 @@
  		if [ $mtkutil_enable == 1 ]; then
  			if [ $hqos_enable == 1 ]; then
  				/sbin/mtkhnat
@@ -496,7 +499,7 @@
  }
  
  cake_mq_setup()
-@@ -1044,48 +1051,49 @@
+@@ -1047,48 +1051,49 @@
  
  	case "$value" in
  		''|*[!0-9]*)
@@ -558,7 +561,7 @@
  }
  
  service_triggers() {
-@@ -1106,7 +1114,7 @@
+@@ -1109,7 +1114,7 @@
  	sync_mt7915e_module_options >/dev/null
  	advanced_runtime_setup "$1"
  	echo 1 > "$STARTUP_MARKER"
@@ -567,7 +570,7 @@
  }
  
  # These settings do not depend on the network interfaces, so they do not have
-@@ -1125,7 +1133,7 @@
+@@ -1128,7 +1133,7 @@
  	esac
  
  	[ "$delay" -eq 0 ] || sleep "$delay"
@@ -576,7 +579,7 @@
  	run_advanced_setup "$2"
  }
  
-@@ -1139,7 +1147,7 @@
+@@ -1142,7 +1147,7 @@
  		advanced_early_setup 2>/dev/null
  		early="early_done"
  	fi
@@ -585,7 +588,7 @@
  
  	procd_open_instance deferred_setup
  	procd_set_param command "$initscript" run_deferred "$delay" $early
-@@ -1147,37 +1155,36 @@
+@@ -1150,37 +1155,36 @@
  }
  
  reload_service() {
