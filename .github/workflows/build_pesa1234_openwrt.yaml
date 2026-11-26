@@ -1,0 +1,468 @@
+name: "Build pesa1234's OpenWrt fork for GL-MT6000"
+
+permissions:
+  contents: write
+  actions: write
+
+on:
+  workflow_dispatch:
+    inputs:
+      runner_type:
+        description: "Runner to build on"
+        required: false
+        default: github-hosted
+        type: choice
+        options:
+          - github-hosted
+          - self-hosted
+      remote_branch:
+        description: "Remote branch to build (leave empty for the latest branch)"
+        required: false
+        default: ""
+        type: string
+      remote_commit:
+        description: "Remote commit SHA to build (leave empty for the latest commit, requires remote_branch to be set)"
+        required: false
+        type: string
+        default: ""
+      use_ccache:
+        description: "Use ccache"
+        required: false
+        default: true
+        type: boolean
+      reuse_build_artifacts:
+        description: "Reuse cached tools and toolchain"
+        required: false
+        default: true
+        type: boolean
+      config_file:
+        description: "Config file to build with"
+        required: false
+        default: mt6000.config
+        type: choice
+        options:
+          - mt6000.config
+          - mt6000_testing.config
+      testing_kernel:
+        description: "Build with testing kernel"
+        required: false
+        default: false
+        type: boolean
+
+env:
+  GH_TOKEN: ${{ github.token }}
+  REMOTE_REPOSITORY: pesa1234/openwrt
+  TARGET_REPOSITORY: "${{ github.repository }}"
+  KEEP_RELEASES: 3
+  KEEP_CACHES: 1
+
+jobs:
+  check_commits:
+    name: Check for new commits
+    runs-on: ${{ inputs.runner_type == 'self-hosted' && 'self-hosted' || 'ubuntu-slim' }}
+    outputs:
+      remote_branch: ${{ steps.check_commits.outputs.remote_branch }}
+      remote_commit: ${{ steps.check_commits.outputs.remote_commit }}
+      latest_commit_sha: ${{ steps.check_commits.outputs.latest_commit_sha }}
+    steps:
+      - name: Check for new commits in remote repo
+        id: check_commits
+        run: |
+          remote_commit="${{ inputs.remote_commit }}"
+          remote_branch="${{ inputs.remote_branch }}"
+          if [ -n "$remote_commit" ] && [ -z "$remote_branch" ]; then
+            echo "*** remote_commit requires remote_branch to be specified as well ***"
+            exit 1
+          fi
+          if [ -z "$remote_branch" ]; then
+            remote_branch=$(git ls-remote "https://github.com/${{ env.REMOTE_REPOSITORY }}.git" "refs/heads/next-*" | sed -e 's|\(.*heads/\)||' | sort -V | tail -n1)
+            if [ -z "$remote_branch" ]; then
+              echo "*** Could not determine remote_branch ***"
+              exit 1
+            fi
+          fi
+          if [ -n "$remote_commit" ]; then
+            latest_commit_sha=$(gh api "repos/${{ env.REMOTE_REPOSITORY }}/commits/${remote_commit}" --jq .sha 2>/dev/null || true)
+            if [ -z "$latest_commit_sha" ]; then
+              echo "*** Commit '$remote_commit' not found in ${{ env.REMOTE_REPOSITORY }} ***"
+              exit 1
+            fi
+          else
+            latest_commit_sha=$(gh api "repos/${{ env.REMOTE_REPOSITORY }}/commits/${remote_branch}" --jq .sha 2>/dev/null || true)
+            if [ -z "$latest_commit_sha" ]; then
+              echo "*** Could not get latest_commit_sha from remote_branch=$remote_branch ***"
+              exit 1
+            fi
+          fi
+          {
+            echo "remote_branch=${remote_branch}"
+            echo "remote_commit=${remote_commit}"
+            echo "latest_commit_sha=${latest_commit_sha}"
+          } | tee -a "$GITHUB_OUTPUT"
+
+  build:
+    name: Build OpenWrt
+    needs: check_commits
+    runs-on: ${{ inputs.runner_type == 'self-hosted' && 'self-hosted' || 'ubuntu-26.04-arm' }}
+    steps:
+      - name: Install dependencies #and free disk space
+        if: runner.environment == 'github-hosted'
+        run: |
+          #echo "=== Disk space stats before ==="
+          #df -h
+          #sudo rm -rf \
+          #  /usr/share/dotnet \
+          #  /usr/local/lib/android \
+          #  /opt/ghc \
+          #  /opt/hostedtoolcache \
+          #  /usr/share/swift \
+          #  /usr/local/julia* \
+          #  /usr/local/share/powershell \
+          #  /usr/share/java \
+          #  /home/linuxbrew \
+          #  /usr/share/miniconda \
+          #  /usr/local/share/chromedriver-linux64 \
+          #  /usr/local/share/edge_driver \
+          #  /usr/local/share/gecko_driver
+          #sudo docker image prune --all --force 2>/dev/null || true
+
+          sudo apt-get update -y
+          sudo apt-get install -y ccache glibc-source mold
+          if [ "${{ runner.arch }}" = "ARM64" ]; then
+            sudo apt-get install -y golang-go
+          fi
+
+          #sudo apt-get remove -y \
+          #  azure-cli firefox google-chrome-stable \
+          #  google-chrome-stable google-cloud-cli kubectl \
+          #  microsoft-edge-stable mysql-common \
+          #  php-common postgresql-common powershell snapd \
+          #  temurin
+          #  'ansible' mono-devel libgl1-mesa-dri chromium-browser
+          #sudo apt-get autoremove --purge -y
+          #sudo apt-get clean -y
+          #echo "=== Disk space stats after ==="
+          #df -h
+          #echo "=== Installed packages ==="
+          #dpkg-query -W -f='${Installed-Size;8}  ${Package}\n' | sort -n
+
+      - name: Configure Git identity
+        run: |
+          git config --global user.name "github-actions"
+          git config --global user.email "github-actions@github.com"
+
+      - name: Restore ccache from cache (GitHub-hosted)
+        if: runner.environment == 'github-hosted' && inputs.use_ccache
+        uses: actions/cache/restore@v6
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ github.run_id }}
+          restore-keys: ccache-
+
+      - name: Set ccache config (GitHub-hosted)
+        if: runner.environment == 'github-hosted' && inputs.use_ccache
+        run: |
+          ccache --set-config=cache_dir=$HOME/.cache/ccache
+          ccache --set-config=compression_level=6
+          ccache --set-config=max_size=10G
+          ccache --set-config=sloppiness=include_file_ctime,include_file_mtime,locale,time_macros
+
+      - name: Checkout remote repository
+        uses: actions/checkout@v7
+        with:
+          repository: ${{ env.REMOTE_REPOSITORY }}
+          ref: ${{ needs.check_commits.outputs.remote_branch }}
+          fetch-depth: 0
+          clean: ${{ !inputs.reuse_build_artifacts }}
+
+      - name: Reset to selected commit
+        if: needs.check_commits.outputs.remote_commit != ''
+        run: git reset --hard "${{ needs.check_commits.outputs.latest_commit_sha }}"
+
+      - name: Checkout current repository
+        uses: actions/checkout@v7
+        with:
+          path: builder_repo
+
+      - name: Restore host tools from cache (GitHub-hosted)
+        if: runner.environment == 'github-hosted' && inputs.reuse_build_artifacts
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            build_dir/host
+            staging_dir/host
+          key: tools-${{ runner.arch }}-${{ hashFiles('tools/**/Makefile') }}-${{ github.run_id }}
+          restore-keys: tools-${{ runner.arch }}-${{ hashFiles('tools/**/Makefile') }}-
+
+      - name: Refresh host tools timestamps (GitHub-hosted)
+        if: runner.environment == 'github-hosted' && inputs.reuse_build_artifacts
+        run: |
+          if [ -d staging_dir/host/stamp ]; then
+            ./scripts/ext-tools.sh --refresh
+          else
+            echo "No prebuilt host tools present; they will be compiled"
+          fi
+
+      - name: Restore toolchain from cache (GitHub-hosted)
+        if: runner.environment == 'github-hosted' && inputs.reuse_build_artifacts
+        uses: actions/cache/restore@v6
+        with:
+          path: |
+            build_dir/toolchain-*
+            staging_dir/toolchain-*
+          key: toolchain-${{ runner.arch }}-${{ hashFiles('toolchain/**/Makefile') }}-${{ github.run_id }}
+          restore-keys: toolchain-${{ runner.arch }}-${{ hashFiles('toolchain/**/Makefile') }}-
+
+      - name: Refresh toolchain timestamps (GitHub-hosted)
+        if: runner.environment == 'github-hosted' && inputs.reuse_build_artifacts
+        run: |
+          if compgen -G "staging_dir/toolchain-*" > /dev/null; then
+            now=$(date +%Y%m%d%H%M.%S)
+            find -H build_dir/toolchain-* staging_dir/toolchain-* -type f -empty -print0 2>/dev/null | xargs -0 -r touch -t "$now"
+          else
+            echo "No prebuilt toolchain present; it will be compiled"
+          fi
+
+      - name: Update feeds
+        run: |
+          #scripts/feeds update -a -f
+          #git -C feeds/packages checkout -- . 2>/dev/null || true
+          for feed in packages luci; do
+            git -C "feeds/$feed" reset --hard 2>/dev/null || true
+            git -C "feeds/$feed" clean -fd 2>/dev/null || true
+          done
+          scripts/feeds update -a
+          rm -rfv feeds/packages/net/mwan3 feeds/luci/applications/luci-app-mwan3
+
+      - name: Checkout luci-app-dnsproxy
+        uses: actions/checkout@v7
+        with:
+          repository: muink/luci-app-dnsproxy
+          path: package/luci-app-dnsproxy
+
+      - name: Checkout mwan3 nftables repository
+        uses: actions/checkout@v7
+        with:
+          repository: dl12345/mwan3
+          ref: openwrt-25.12-beta
+          path: feeds/packages/net/mwan3
+
+      - name: Checkout luci-app-mwan3 nftables repository
+        uses: actions/checkout@v7
+        with:
+          repository: dl12345/luci-app-mwan3
+          ref: openwrt-25.12-beta
+          path: feeds/luci/applications/luci-app-mwan3
+
+      - name: Checkout usteer-ng
+        uses: actions/checkout@v7
+        with:
+          repository: NilsRo/usteer-ng
+          path: usteer-ng
+          fetch-depth: 0
+
+      - name: Pin usteer-ng version
+        run: |
+          cd usteer-ng
+          SRC_SHA=$(git rev-parse HEAD)
+          SRC_DATE=$(git show -s --format=%cd --date=short HEAD)
+          sed -i -e '/^PKG_VERSION:=/d' -e "s|^PKG_SOURCE_VERSION:=.*|PKG_SOURCE_VERSION:=${SRC_SHA}\nPKG_SOURCE_DATE:=${SRC_DATE}\nPKG_RELEASE:=1|" openwrt/usteer-ng/Makefile
+
+      - name: Refresh feed index and install packages
+        run: |
+          ln -fnsrv usteer-ng/openwrt/usteer-ng feeds/packages/net/usteer-ng
+          scripts/feeds update -i packages luci
+          scripts/feeds install -a
+
+      - name: Setup configuration and custom files
+        run: |
+          cp -fv "builder_repo/config/${{ inputs.config_file }}" .config
+          set_kconfig() {
+            local sym="$1" val="${2-}"
+            sed -i -e "/^${sym}=/d" -e "/^# ${sym} is not set\$/d" .config
+            if [ -n "$val" ]; then
+              echo "${sym}=\"${val}\"" >> .config
+            else
+              echo "${sym}=y" >> .config
+            fi
+          }
+          if [ "${{ inputs.use_ccache }}" = "true" ]; then
+            if command -v ccache >/dev/null 2>&1; then
+              set_kconfig CONFIG_CCACHE
+              set_kconfig CONFIG_CCACHE_DIR "$HOME/.cache/ccache"
+              echo "=== ccache config ==="
+              ccache -p
+              echo "=== ccache config ==="
+            else
+              echo "WARNING: ccache is enabled but ccache binary was not found on the runner. Building without ccache"
+            fi
+          fi
+          if [ "${{ inputs.testing_kernel }}" = "true" ]; then
+            set_kconfig CONFIG_TESTING_KERNEL
+          fi
+          if [ "${{ runner.arch }}" = "ARM64" ]; then
+            set_kconfig CONFIG_GOLANG_EXTERNAL_BOOTSTRAP_ROOT "$(go env GOROOT)"
+            sed -i -e '/^CONFIG_GOLANG_BUILD_BOOTSTRAP=/d' \
+                   -e '/^# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set$/d' .config
+            echo "# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set" >> .config
+          fi
+          #rsync -a builder_repo/files ./
+          ln -sfnv builder_repo/files files
+          #rsync -a builder_repo/patches patches
+          while IFS= read -r -d '' file; do
+            patch -f -p1 -i "${file}"
+          done < <(find builder_repo/patches -name "*.patch" -print0 | sort -z)
+          make defconfig
+
+      - name: Build firmware
+        run: |
+          make download -j$(nproc) || {
+            echo "Retrying..."
+            sleep 30
+            make download -j1 V=s
+          }
+          make -j$(nproc) || {
+            echo "Retrying..."
+            sleep 30
+            make -j1 V=s
+          }
+          if [ "${{ inputs.use_ccache }}" = "true" ] && command -v ccache >/dev/null 2>&1; then
+            echo "=== ccache stats ==="
+            ccache -s
+            echo "=== ccache stats ==="
+          fi
+          if [ -d ./release ]; then
+            rm -rfv ./release/*
+          else
+            mkdir -p ./release
+          fi
+          find bin -type f -iname 'openwrt-*-sysupgrade.bin' -exec cp -v {} release/ \;
+          mv -v .config release/full.config
+          (cd release && sha256sum openwrt-*-sysupgrade.bin full.config > sha256sums)
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: gl-mt6000-firmware
+          path: release/*
+
+      - name: Get release info
+        run: |
+          version=$(find bin -type f -iname 'version.buildinfo' -print -quit | xargs -r cat | tr -d '\n')
+          if [ -z "$version" ]; then
+            echo "*** version.buildinfo not found ***"
+            exit 1
+          fi
+          RELEASE_TAG="$(date +%F)_${version}_${{ needs.check_commits.outputs.remote_branch }}"
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
+
+      - name: Commit build artifacts
+        run: |
+          mv -v bin/* builder_repo/
+          cd builder_repo
+          git add .
+          git diff --cached --quiet || git commit -m "$RELEASE_TAG"
+          git push origin main
+
+      - name: Create release
+        run: |
+          if gh release view "$RELEASE_TAG" --repo "$TARGET_REPOSITORY" >/dev/null 2>&1; then
+            gh release delete "$RELEASE_TAG" --cleanup-tag -y --repo "$TARGET_REPOSITORY"
+          fi
+          REMOTE_REPOSITORY="${{ env.REMOTE_REPOSITORY }}"
+          REMOTE_BRANCH="${{ needs.check_commits.outputs.remote_branch }}"
+          LATEST_COMMIT="${{ needs.check_commits.outputs.latest_commit_sha }}"
+          cat > release_notes.md <<EOF
+          **Branch:** [${REMOTE_BRANCH}](https://github.com/${REMOTE_REPOSITORY}/tree/${REMOTE_BRANCH})
+          **Commit:** [${LATEST_COMMIT}](https://github.com/${REMOTE_REPOSITORY}/commit/${LATEST_COMMIT})
+          EOF
+          #### 🔄 Main Repository
+          #- **Repository:** [${REMOTE_REPOSITORY}](https://github.com/${REMOTE_REPOSITORY})
+          #- **Branch:** ${REMOTE_BRANCH}
+          #- **Commit:** ${LATEST_COMMIT}
+          #
+          #### 📝 Build Information
+          #- **Target:** [GL.iNet Flint 2 (GL-MT6000)](https://openwrt.org/toh/gl.inet/gl-mt6000)
+          #- **Configuration:** [${{ inputs.config_file }}](https://github.com/$TARGET_REPOSITORY/blob/main/config/${{ inputs.config_file }})
+          #EOF
+          #package_list=$(sed -n '/<!-- package-list-start -->/,/<!-- package-list-end -->/{ /<!--/d; p }' builder_repo/README.md)
+          #if [ -z "$package_list" ]; then
+          #  echo "WARNING: package list section not found in README.md"
+          #  echo "- *package list not found in README.md*" >> release_notes.md
+          #else
+          #  echo "$package_list" >> release_notes.md
+          #fi
+          gh release create "$RELEASE_TAG" --repo "$TARGET_REPOSITORY" --latest --title "$RELEASE_TAG" --notes-file release_notes.md release/*
+
+      - name: Clean up old builds
+        run: |
+          for i in $(seq 1 10); do
+            if gh api "repos/$TARGET_REPOSITORY/releases" --jq '.[].tag_name' | grep -qx "$RELEASE_TAG"; then
+              break
+            fi
+            echo "=== Release list not yet consistent, retrying ($i)... ==="
+            sleep 3
+          done
+          releases=$(gh api "repos/$TARGET_REPOSITORY/releases" --paginate --jq 'sort_by(.created_at) | reverse')
+          echo "=== Releases that will be kept (newest ${{ env.KEEP_RELEASES }}) ==="
+          echo "$releases" | jq -r ".[:${{ env.KEEP_RELEASES }}] | .[] | \"\(.created_at)  id=\(.id)  tag=\(.tag_name)\""
+          echo "=== Releases that will be deleted ==="
+          echo "$releases" | jq -r ".[${{ env.KEEP_RELEASES }}:] | .[] | \"\(.created_at)  id=\(.id)  tag=\(.tag_name)\""
+          cd builder_repo
+          git fetch origin main
+          git reset --hard origin/main
+          echo "$releases" | jq -r ".[${{ env.KEEP_RELEASES }}:] | .[] | \"\(.id) \(.tag_name)\"" | while read id tag; do
+            gh api -X DELETE "repos/$TARGET_REPOSITORY/releases/$id" && gh api -X DELETE "repos/$TARGET_REPOSITORY/git/refs/tags/$tag" 2>/dev/null || true
+            if [ -d "$tag" ]; then
+              rm -rfv "$tag"
+              git add -A
+              git diff --cached --quiet || git commit -m "Delete $tag directory"
+              git push origin main
+            fi
+          done
+
+      - name: Save ccache to cache (GitHub-hosted)
+        if: runner.environment == 'github-hosted' && inputs.use_ccache
+        uses: actions/cache/save@v6
+        env:
+          ZSTD_CLEVEL: 9
+        with:
+          path: ~/.cache/ccache
+          key: ccache-${{ github.run_id }}
+
+      - name: Save host tools to cache (GitHub-hosted)
+        if: runner.environment == 'github-hosted' && inputs.reuse_build_artifacts
+        uses: actions/cache/save@v6
+        env:
+          ZSTD_CLEVEL: 9
+        with:
+          path: |
+            build_dir/host
+            staging_dir/host
+          key: tools-${{ runner.arch }}-${{ hashFiles('tools/**/Makefile') }}-${{ github.run_id }}
+
+      - name: Save toolchain to cache (GitHub-hosted)
+        if: runner.environment == 'github-hosted' && inputs.reuse_build_artifacts
+        uses: actions/cache/save@v6
+        env:
+          ZSTD_CLEVEL: 9
+        with:
+          path: |
+            build_dir/toolchain-*
+            staging_dir/toolchain-*
+          key: toolchain-${{ runner.arch }}-${{ hashFiles('toolchain/**/Makefile') }}-${{ github.run_id }}
+
+      - name: Evict old caches
+        if: runner.environment == 'github-hosted'
+        env:
+          GH_REPO: ${{ env.TARGET_REPOSITORY }}
+        run: |
+          for prefix in "ccache-" "tools-${{ runner.arch }}-" "toolchain-${{ runner.arch }}-"; do
+            echo "=== Matching caches for '$prefix' (most-recently-used first) ==="
+            gh cache list --limit 100 --json id,key,lastAccessedAt --jq "map(select(.key | startswith(\"$prefix\"))) | sort_by(.lastAccessedAt) | reverse | .[] | \"\(.lastAccessedAt)  id=\(.id)  key=\(.key)\""
+            echo "=== Deleting all but the newest ${{ env.KEEP_CACHES }} for '$prefix' ==="
+            gh cache list --limit 100 --json id,key,lastAccessedAt --jq "map(select(.key | startswith(\"$prefix\"))) | sort_by(.lastAccessedAt) | reverse | .[${{ env.KEEP_CACHES }}:] | .[].id" | while read id; do
+              echo "deleting cache id=$id"
+              gh cache delete "$id" || true
+            done
+          done
