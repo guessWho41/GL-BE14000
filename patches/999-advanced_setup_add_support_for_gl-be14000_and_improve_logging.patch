@@ -685,7 +685,7 @@
  }
  
  cake_mq_setup()
-@@ -1044,48 +1196,49 @@
+@@ -1044,48 +1196,57 @@
  
  	case "$value" in
  		''|*[!0-9]*)
@@ -702,52 +702,76 @@
  
  usb_setup()
  {
- 	usb2=$(uci get advanced.@defaults[0].usb_2 2>/dev/null || echo "x")
- 	if [ $usb2 == 1 ]; then
+-	usb2=$(uci get advanced.@defaults[0].usb_2 2>/dev/null || echo "x")
+-	if [ $usb2 == 1 ]; then
 -		logger -s "advanced_setup: USB Speed set to 2.0"
-+		log_msg "[USB] Setting port speed to 2.0"
- 		echo 1 > /sys/bus/usb/devices/usb2/2-0:1.0/usb2-port1/disable
- 	elif [ $usb2 == 0 ]; then
+-		echo 1 > /sys/bus/usb/devices/usb2/2-0:1.0/usb2-port1/disable
+-	elif [ $usb2 == 0 ]; then
 -		logger -s "advanced_setup: USB Speed set to 3.0"
-+		log_msg "[USB] Setting port speed to 3.0"
- 		echo 0 > /sys/bus/usb/devices/usb2/2-0:1.0/usb2-port1/disable
- 	fi
+-		echo 0 > /sys/bus/usb/devices/usb2/2-0:1.0/usb2-port1/disable
+-	fi
 -	
-+
- 	usbpower=$(uci get advanced.@defaults[0].usb_power 2>/dev/null || echo "x")
- 	if [ $usbpower == 1 ]; then
+-	usbpower=$(uci get advanced.@defaults[0].usb_power 2>/dev/null || echo "x")
+-	if [ $usbpower == 1 ]; then
 -		logger -s "advanced_setup: USB Power ON"
-+		log_msg "[USB] Enabling port power"
- 		echo 1 > /sys/devices/platform/regulator-usb-vbus/usb_vbus_enable
- 	elif [ $usbpower == 0 ]; then
+-		echo 1 > /sys/devices/platform/regulator-usb-vbus/usb_vbus_enable
+-	elif [ $usbpower == 0 ]; then
 -		logger -s "advanced_setup: USB Power OFF"
-+		log_msg "[USB] Disabling port power"
- 		echo 0 > /sys/devices/platform/regulator-usb-vbus/usb_vbus_enable
- 	fi
+-		echo 0 > /sys/devices/platform/regulator-usb-vbus/usb_vbus_enable
+-	fi
 -	
-+
  	USB2_PATH="/sys/bus/usb/devices/usb2/2-0:1.0/usb2-port1/disable"
  	USBPOWER_PATH="/sys/devices/platform/regulator-usb-vbus/usb_vbus_enable"
- 	status2=$(cat "$USB2_PATH")
- 	statuspower=$(cat "$USBPOWER_PATH")
- 	if [ "$status2" -eq 1 ]; then
+-	status2=$(cat "$USB2_PATH")
+-	statuspower=$(cat "$USBPOWER_PATH")
+-	if [ "$status2" -eq 1 ]; then
 -		logger -s "advanced_setup: USB Speed is set to 2.0"
-+		log_msg "[USB] Port speed is now 2.0"
++
++	if [ -e "$USB2_PATH" ]; then
++		usb2=$(uci get advanced.@defaults[0].usb_2 2>/dev/null || echo "x")
++		if [ "$usb2" = "1" ]; then
++			log_msg "[USB] Setting port speed to 2.0"
++			echo 1 > "$USB2_PATH"
++		elif [ "$usb2" = "0" ]; then
++			log_msg "[USB] Setting port speed to 3.0"
++			echo 0 > "$USB2_PATH"
++		fi
++
++		if [ "$(cat "$USB2_PATH" 2>/dev/null)" = "1" ]; then
++			log_msg "[USB] Port speed is now 2.0"
++		else
++			log_msg "[USB] Port speed is now 3.0"
++		fi
 +	else
-+		log_msg "[USB] Port speed is now 3.0"
++		log_msg "[USB] Port speed control not available on this board"
  	fi
- 	if [ "$statuspower" -eq 1 ]; then
+-	if [ "$statuspower" -eq 1 ]; then
 -		logger -s "advanced_setup: USB is power ON"
-+		log_msg "[USB] Port power is now enabled"
++
++	if [ -e "$USBPOWER_PATH" ]; then
++		usbpower=$(uci get advanced.@defaults[0].usb_power 2>/dev/null || echo "x")
++		if [ "$usbpower" = "1" ]; then
++			log_msg "[USB] Enabling port power"
++			echo 1 > "$USBPOWER_PATH"
++		elif [ "$usbpower" = "0" ]; then
++			log_msg "[USB] Disabling port power"
++			echo 0 > "$USBPOWER_PATH"
++		fi
++
++		if [ "$(cat "$USBPOWER_PATH" 2>/dev/null)" = "1" ]; then
++			log_msg "[USB] Port power is now enabled"
++		else
++			log_msg "[USB] Port power is now disabled"
++		fi
  	else
 -		logger -s "advanced_setup: USB is power OFF"
-+		log_msg "[USB] Port power is now disabled"
++		log_msg "[USB] Port power control not available on this board"
  	fi
 -	
  }
  
  service_triggers() {
-@@ -1106,7 +1259,7 @@
+@@ -1106,7 +1267,7 @@
  	sync_mt7915e_module_options >/dev/null
  	advanced_runtime_setup "$1"
  	echo 1 > "$STARTUP_MARKER"
@@ -756,7 +780,7 @@
  }
  
  # These settings do not depend on the network interfaces, so they do not have
-@@ -1125,7 +1278,7 @@
+@@ -1125,7 +1286,7 @@
  	esac
  
  	[ "$delay" -eq 0 ] || sleep "$delay"
@@ -765,7 +789,7 @@
  	run_advanced_setup "$2"
  }
  
-@@ -1139,7 +1292,7 @@
+@@ -1139,7 +1300,7 @@
  		advanced_early_setup 2>/dev/null
  		early="early_done"
  	fi
@@ -774,7 +798,7 @@
  
  	procd_open_instance deferred_setup
  	procd_set_param command "$initscript" run_deferred "$delay" $early
-@@ -1147,37 +1300,36 @@
+@@ -1147,37 +1308,36 @@
  }
  
  reload_service() {
