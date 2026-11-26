@@ -1,4 +1,4 @@
-name: "Build pesa1234's OpenWrt fork for GL-MT6000"
+name: "Build pesa1234's OpenWrt fork for GL-BE14000"
 
 permissions:
   contents: write
@@ -38,11 +38,11 @@ on:
       config_file:
         description: "Config file to build with"
         required: false
-        default: mt6000.config
+        default: be14000.config
         type: choice
         options:
-          - mt6000.config
-          - mt6000_testing.config
+          - be14000.config
+          - be14000_testing.config
       testing_kernel:
         description: "Build with testing kernel"
         required: false
@@ -276,6 +276,8 @@ jobs:
 
       - name: Setup configuration and custom files
         run: |
+          RELEASE_TAG="$(date +%F)_$(./scripts/getver.sh)_${{ needs.check_commits.outputs.remote_branch }}"
+          echo "RELEASE_TAG=${RELEASE_TAG}" >> "$GITHUB_ENV"
           cp -fv "builder_repo/config/${{ inputs.config_file }}" .config
           set_kconfig() {
             local sym="$1" val="${2-}"
@@ -306,9 +308,7 @@ jobs:
                    -e '/^# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set$/d' .config
             echo "# CONFIG_GOLANG_BUILD_BOOTSTRAP is not set" >> .config
           fi
-          #rsync -a builder_repo/files ./
           ln -sfnv builder_repo/files files
-          #rsync -a builder_repo/patches patches
           while IFS= read -r -d '' file; do
             patch -f -p1 -i "${file}"
           done < <(find builder_repo/patches -name "*.patch" -print0 | sort -z)
@@ -343,18 +343,8 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
-          name: gl-mt6000-firmware
+          name: gl-be14000-firmware
           path: release/*
-
-      - name: Get release info
-        run: |
-          version=$(find bin -type f -iname 'version.buildinfo' -print -quit | xargs -r cat | tr -d '\n')
-          if [ -z "$version" ]; then
-            echo "*** version.buildinfo not found ***"
-            exit 1
-          fi
-          RELEASE_TAG="$(date +%F)_${version}_${{ needs.check_commits.outputs.remote_branch }}"
-          echo "RELEASE_TAG=${RELEASE_TAG}" >> $GITHUB_ENV
 
       - name: Commit build artifacts
         run: |
@@ -376,22 +366,6 @@ jobs:
           **Branch:** [${REMOTE_BRANCH}](https://github.com/${REMOTE_REPOSITORY}/tree/${REMOTE_BRANCH})
           **Commit:** [${LATEST_COMMIT}](https://github.com/${REMOTE_REPOSITORY}/commit/${LATEST_COMMIT})
           EOF
-          #### 🔄 Main Repository
-          #- **Repository:** [${REMOTE_REPOSITORY}](https://github.com/${REMOTE_REPOSITORY})
-          #- **Branch:** ${REMOTE_BRANCH}
-          #- **Commit:** ${LATEST_COMMIT}
-          #
-          #### 📝 Build Information
-          #- **Target:** [GL.iNet Flint 2 (GL-MT6000)](https://openwrt.org/toh/gl.inet/gl-mt6000)
-          #- **Configuration:** [${{ inputs.config_file }}](https://github.com/$TARGET_REPOSITORY/blob/main/config/${{ inputs.config_file }})
-          #EOF
-          #package_list=$(sed -n '/<!-- package-list-start -->/,/<!-- package-list-end -->/{ /<!--/d; p }' builder_repo/README.md)
-          #if [ -z "$package_list" ]; then
-          #  echo "WARNING: package list section not found in README.md"
-          #  echo "- *package list not found in README.md*" >> release_notes.md
-          #else
-          #  echo "$package_list" >> release_notes.md
-          #fi
           gh release create "$RELEASE_TAG" --repo "$TARGET_REPOSITORY" --latest --title "$RELEASE_TAG" --notes-file release_notes.md release/*
 
       - name: Clean up old builds
