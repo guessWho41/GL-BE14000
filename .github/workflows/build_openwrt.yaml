@@ -217,8 +217,8 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: |
-            build_dir/toolchain-*
-            staging_dir/toolchain-*
+            ${{ env.REMOTE_REPO_KEY }}/build_dir/toolchain-*
+            ${{ env.REMOTE_REPO_KEY }}/staging_dir/toolchain-*
           key: toolchain-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-${{ hashFiles(format('{0}/toolchain/**/Makefile', env.REMOTE_REPO_KEY)) }}-${{ github.run_id }}
           restore-keys: toolchain-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-${{ hashFiles(format('{0}/toolchain/**/Makefile', env.REMOTE_REPO_KEY)) }}-
 
@@ -426,7 +426,7 @@ jobs:
           path: |
             ${{ env.REMOTE_REPO_KEY }}/build_dir/host
             ${{ env.REMOTE_REPO_KEY }}/staging_dir/host
-          key: tools-${{ runner.arch }}-${{ hashFiles(format('{0}/tools/**/Makefile', env.REMOTE_REPO_KEY)) }}-${{ github.run_id }}
+          key: tools-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-${{ hashFiles(format('{0}/tools/**/Makefile', env.REMOTE_REPO_KEY)) }}-${{ github.run_id }}
 
       - name: Save toolchain to cache (GitHub-hosted)
         if: runner.environment == 'github-hosted' && inputs.reuse_build_artifacts
@@ -437,7 +437,7 @@ jobs:
           path: |
             ${{ env.REMOTE_REPO_KEY }}/build_dir/toolchain-*
             ${{ env.REMOTE_REPO_KEY }}/staging_dir/toolchain-*
-          key: toolchain-${{ runner.arch }}-${{ hashFiles(format('{0}/toolchain/**/Makefile', env.REMOTE_REPO_KEY)) }}-${{ github.run_id }}
+          key: toolchain-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-${{ hashFiles(format('{0}/toolchain/**/Makefile', env.REMOTE_REPO_KEY)) }}-${{ github.run_id }}
 
       - name: Evict old caches
         if: runner.environment == 'github-hosted'
