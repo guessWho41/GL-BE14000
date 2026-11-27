@@ -38,11 +38,11 @@ on:
       config_file:
         description: "Config file to build with"
         required: false
-        default: be14000.config
+        default: be14000_pesa1234.config
         type: choice
         options:
-          - be14000.config
-          - be14000_testing.config
+          - be14000_pesa1234.config
+          - be14000_testing_pesa1234.config
       testing_kernel:
         description: "Build with testing kernel"
         required: false
@@ -312,6 +312,7 @@ jobs:
           while IFS= read -r -d '' file; do
             patch -f -p1 -i "${file}"
           done < <(find builder_repo/patches -name "*.patch" -print0 | sort -z)
+          done < <(find builder_repo/patches_pesa1234 -name "*.patch" -print0 | sort -z)
           make defconfig
 
       - name: Build firmware
