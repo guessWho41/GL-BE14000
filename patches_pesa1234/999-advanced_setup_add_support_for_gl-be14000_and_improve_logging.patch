@@ -619,7 +619,24 @@
  			#TCP Binding
  			iptables -D FORWARD -p tcp -m conntrack --ctstate RELATED,ESTABLISHED -j FLOWOFFLOAD --hw
  			ip6tables -D FORWARD -p tcp -m conntrack --ctstate RELATED,ESTABLISHED -j FLOWOFFLOAD --hw
-@@ -815,7 +969,7 @@
+@@ -733,6 +887,8 @@
+ 	fi
+ }
+ 
++# These two helpers are also used for mt7996e (GL-BE14000): they work on any
++# module file in /etc/modules.d.
+ mt7915e_module_has_token()
+ {
+ 	local module_file="$1"
+@@ -765,6 +921,7 @@
+ sync_mt7915e_wed_module_options()
+ {
+ 	MODULE_FILE="/etc/modules.d/mt7915e"
++	[ -e "$MODULE_FILE" ] || { echo "0"; return 0; }
+ 	wed=$(uci -q get advanced.@defaults[0].wed_offloading 2>/dev/null)
+ 
+ 	if [ -z "$wed" ]; then
+@@ -815,7 +972,7 @@
  
  		if [ "$old_content" != "$new_line" ]; then
  			printf '%s\n' "$new_line" > "$MODULE_FILE"
@@ -628,7 +645,7 @@
  			echo "0"
  			return 0
  		fi
-@@ -825,7 +979,7 @@
+@@ -825,7 +982,7 @@
  		runtime_wed=$(cat /sys/module/mt7915e/parameters/wed_enable 2>/dev/null)
  		if { [ "$wed" = "1" ] && [ "$runtime_wed" != "Y" ]; } || \
  		   { [ "$wed" = "0" ] && [ "$runtime_wed" != "N" ]; }; then
@@ -637,7 +654,86 @@
  			echo "0"
  			return 0
  		fi
-@@ -869,7 +1023,7 @@
+@@ -834,6 +991,78 @@
+ 	echo "0"
+ }
+ 
++sync_mt7996e_wed_module_options()
++{
++	local MODULE_FILE="/etc/modules.d/mt7996e"
++	local PARAM_FILE="/sys/module/mt7996e/parameters/wed_enable"
++	local wed runtime_wed old_content new_line wed_token_added token
++
++	[ -e "$MODULE_FILE" ] || { echo "0"; return 0; }
++
++	wed=$(uci -q get advanced.@defaults[0].wed_offloading 2>/dev/null)
++	runtime_wed=$(cat "$PARAM_FILE" 2>/dev/null)
++
++	if [ -z "$wed" ]; then
++		# First run: keep the mode the driver is using now
++		if [ "$runtime_wed" = "Y" ] || mt7915e_module_has_token "$MODULE_FILE" "wed_enable=1"; then
++			wed=1
++		else
++			wed=0
++		fi
++
++		uci set advanced.@defaults[0].wed_offloading="$wed" 2>/dev/null
++		uci commit advanced 2>/dev/null
++	fi
++
++	case "$wed" in
++		1|on|true|yes|enabled)
++			wed=1
++			;;
++		*)
++			wed=0
++			;;
++	esac
++
++	old_content=$(cat "$MODULE_FILE" 2>/dev/null)
++	new_line="mt7996e"
++	wed_token_added=0
++
++	set -- $old_content
++	for token in "$@"; do
++		case "$token" in
++			mt7996e)
++				;;
++			wed_enable=*)
++				if [ "$wed" = "1" ] && [ "$wed_token_added" = "0" ]; then
++					append_mt7915e_module_token "wed_enable=1"
++					wed_token_added=1
++				fi
++				;;
++			*)
++				append_mt7915e_module_token "$token"
++				;;
++		esac
++	done
++
++	if [ "$wed" = "1" ] && [ "$wed_token_added" = "0" ]; then
++		append_mt7915e_module_token "wed_enable=1"
++	fi
++
++	if [ "$old_content" != "$new_line" ]; then
++		printf '%s\n' "$new_line" > "$MODULE_FILE"
++		log_msg "[WED] $MODULE_FILE updated with '$new_line', reboot required for the WED mode change"
++		echo "0"
++		return 0
++	fi
++
++	if { [ "$wed" = "1" ] && [ "$runtime_wed" = "N" ]; } || \
++	   { [ "$wed" = "0" ] && [ "$runtime_wed" = "Y" ]; }; then
++		log_msg "[WED] mt7996e runtime state is '$runtime_wed' but UCI is set to '$wed', reboot required"
++	fi
++
++	echo "0"
++}
++
+ sync_mt7915e_airtime_module_options()
+ {
+ 	MODULE_FILE="/etc/modules.d/mt7915e"
+@@ -869,7 +1098,7 @@
  
  		if [ "$old_content" != "$new_line" ]; then
  			printf '%s\n' "$new_line" > "$MODULE_FILE"
@@ -646,7 +742,7 @@
  		fi
  	fi
  
-@@ -923,7 +1077,7 @@
+@@ -923,7 +1152,7 @@
  
  		if [ "$old_content" != "$new_line" ]; then
  			printf '%s\n' "$new_line" > "$MODULE_FILE"
@@ -655,7 +751,7 @@
  		fi
  	fi
  }
-@@ -935,7 +1089,6 @@
+@@ -935,7 +1164,6 @@
  
  	wed_changed=$(sync_mt7915e_wed_module_options)
  	atf_changed=$(sync_mt7915e_airtime_module_options)
@@ -663,7 +759,7 @@
  
  	if [ "$wed_changed" = "1" ] || [ "$atf_changed" = "1" ]; then
  		echo "1"
-@@ -963,7 +1116,7 @@
+@@ -963,7 +1191,7 @@
  	for FILE in /sys/kernel/debug/ieee80211/*/mt76/vow_atf; do
  		[ -e "$FILE" ] || continue
  		found=1
@@ -672,7 +768,7 @@
  		printf '%s\n' "$atf" > "$FILE"
  	done
  
-@@ -1022,11 +1175,10 @@
+@@ -1022,11 +1250,10 @@
  		if [ $mtkutil_enable == 1 ]; then
  			if [ $hqos_enable == 1 ]; then
  				/sbin/mtkhnat
@@ -685,7 +781,7 @@
  }
  
  cake_mq_setup()
-@@ -1044,48 +1196,57 @@
+@@ -1044,48 +1271,104 @@
  
  	case "$value" in
  		''|*[!0-9]*)
@@ -698,6 +794,25 @@
  	echo "$value" > "$CAKE_SYNC_TIME_PATH"
 -	logger -t advanced_setup "cake_mq sync_time set to $(cat "$CAKE_SYNC_TIME_PATH" 2>/dev/null)"
 +	log_msg "[CAKE_MQ] sync_time set to $(cat "$CAKE_SYNC_TIME_PATH" 2>/dev/null)"
++}
++
++# Prints the "disable" file of each SuperSpeed root-hub port. Disabling these
++# ports leaves only the USB 2.0 lines, so devices connect at 2.0 speed.
++usb_superspeed_ports()
++{
++	local hub speed port
++
++	for hub in /sys/bus/usb/devices/usb*; do
++		speed=$(cat "$hub/speed" 2>/dev/null)
++		case "$speed" in
++			''|*[!0-9]*) continue ;;
++		esac
++		[ "$speed" -ge 5000 ] || continue
++
++		for port in "$hub"/*-0:1.0/"${hub##*/}"-port*/disable; do
++			[ -e "$port" ] && printf '%s\n' "$port"
++		done
++	done
  }
  
  usb_setup()
@@ -720,49 +835,78 @@
 -		echo 0 > /sys/devices/platform/regulator-usb-vbus/usb_vbus_enable
 -	fi
 -	
- 	USB2_PATH="/sys/bus/usb/devices/usb2/2-0:1.0/usb2-port1/disable"
+-	USB2_PATH="/sys/bus/usb/devices/usb2/2-0:1.0/usb2-port1/disable"
++	# Port speed: every SuperSpeed root-hub port (GL-MT6000: usb2-port1,
++	# GL-BE14000: usb2-port1 and usb4-port1).
++	# Port power: the patched regulator on the GL-MT6000, otherwise the exported
++	# GPIOs (GL-BE14000: usb_power for USB-A, typec_power for USB-C).
  	USBPOWER_PATH="/sys/devices/platform/regulator-usb-vbus/usb_vbus_enable"
 -	status2=$(cat "$USB2_PATH")
 -	statuspower=$(cat "$USBPOWER_PATH")
 -	if [ "$status2" -eq 1 ]; then
 -		logger -s "advanced_setup: USB Speed is set to 2.0"
++	USB_POWER_GPIOS="usb_power typec_power"
++	local speed_files power_files file gpio port usb2 usbpower
 +
-+	if [ -e "$USB2_PATH" ]; then
++	speed_files=$(usb_superspeed_ports)
++
++	if [ -n "$speed_files" ]; then
 +		usb2=$(uci get advanced.@defaults[0].usb_2 2>/dev/null || echo "x")
 +		if [ "$usb2" = "1" ]; then
 +			log_msg "[USB] Setting port speed to 2.0"
-+			echo 1 > "$USB2_PATH"
 +		elif [ "$usb2" = "0" ]; then
 +			log_msg "[USB] Setting port speed to 3.0"
-+			echo 0 > "$USB2_PATH"
 +		fi
 +
-+		if [ "$(cat "$USB2_PATH" 2>/dev/null)" = "1" ]; then
-+			log_msg "[USB] Port speed is now 2.0"
-+		else
-+			log_msg "[USB] Port speed is now 3.0"
-+		fi
++		for file in $speed_files; do
++			port=${file%/disable}
++			port=${port##*/}
++			if [ "$usb2" = "1" ] || [ "$usb2" = "0" ]; then
++				echo "$usb2" > "$file" || log_err "[USB] Failed to set port speed of $port"
++			fi
++
++			if [ "$(cat "$file" 2>/dev/null)" = "1" ]; then
++				log_msg "[USB] Port speed of $port is now 2.0"
++			else
++				log_msg "[USB] Port speed of $port is now 3.0"
++			fi
++		done
 +	else
 +		log_msg "[USB] Port speed control not available on this board"
++	fi
++
++	if [ -e "$USBPOWER_PATH" ]; then
++		power_files="$USBPOWER_PATH"
++	else
++		power_files=""
++		for gpio in $USB_POWER_GPIOS; do
++			[ -e "/sys/class/gpio/$gpio/value" ] && power_files="$power_files /sys/class/gpio/$gpio/value"
++		done
  	fi
 -	if [ "$statuspower" -eq 1 ]; then
 -		logger -s "advanced_setup: USB is power ON"
 +
-+	if [ -e "$USBPOWER_PATH" ]; then
++	if [ -n "$power_files" ]; then
 +		usbpower=$(uci get advanced.@defaults[0].usb_power 2>/dev/null || echo "x")
 +		if [ "$usbpower" = "1" ]; then
 +			log_msg "[USB] Enabling port power"
-+			echo 1 > "$USBPOWER_PATH"
 +		elif [ "$usbpower" = "0" ]; then
 +			log_msg "[USB] Disabling port power"
-+			echo 0 > "$USBPOWER_PATH"
 +		fi
 +
-+		if [ "$(cat "$USBPOWER_PATH" 2>/dev/null)" = "1" ]; then
-+			log_msg "[USB] Port power is now enabled"
-+		else
-+			log_msg "[USB] Port power is now disabled"
-+		fi
++		for file in $power_files; do
++			port=${file%/*}
++			port=${port##*/}
++			if [ "$usbpower" = "1" ] || [ "$usbpower" = "0" ]; then
++				echo "$usbpower" > "$file" || log_err "[USB] Failed to set port power of $port"
++			fi
++
++			if [ "$(cat "$file" 2>/dev/null)" = "1" ]; then
++				log_msg "[USB] Port power of $port is now enabled"
++			else
++				log_msg "[USB] Port power of $port is now disabled"
++			fi
++		done
  	else
 -		logger -s "advanced_setup: USB is power OFF"
 +		log_msg "[USB] Port power control not available on this board"
@@ -771,8 +915,11 @@
  }
  
  service_triggers() {
-@@ -1106,7 +1267,7 @@
+@@ -1104,15 +1387,17 @@
+ 
+ run_advanced_setup() {
  	sync_mt7915e_module_options >/dev/null
++	sync_mt7996e_wed_module_options >/dev/null
  	advanced_runtime_setup "$1"
  	echo 1 > "$STARTUP_MARKER"
 -	logger -t advanced_setup "advanced_setup finished"
@@ -780,7 +927,14 @@
  }
  
  # These settings do not depend on the network interfaces, so they do not have
-@@ -1125,7 +1286,7 @@
+ # to wait for the deferred setup, which then leaves them out.
+ advanced_early_setup() {
+ 	sync_mt7915e_module_options >/dev/null
++	sync_mt7996e_wed_module_options >/dev/null
+ 	usb_setup
+ 	hw_atf_setup
+ }
+@@ -1125,7 +1410,7 @@
  	esac
  
  	[ "$delay" -eq 0 ] || sleep "$delay"
@@ -789,7 +943,7 @@
  	run_advanced_setup "$2"
  }
  
-@@ -1139,7 +1300,7 @@
+@@ -1139,7 +1424,7 @@
  		advanced_early_setup 2>/dev/null
  		early="early_done"
  	fi
@@ -798,7 +952,7 @@
  
  	procd_open_instance deferred_setup
  	procd_set_param command "$initscript" run_deferred "$delay" $early
-@@ -1147,37 +1308,36 @@
+@@ -1147,37 +1432,37 @@
  }
  
  reload_service() {
@@ -828,6 +982,7 @@
 +		wed)
 +			log_msg "Reloading WED settings"
  			sync_mt7915e_wed_module_options >/dev/null
++			sync_mt7996e_wed_module_options >/dev/null
  			;;
  		cake)
 -			logger -t advanced_setup "advanced_setup cake"
