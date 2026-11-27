@@ -107,7 +107,7 @@ jobs:
     runs-on: ${{ inputs.runner_type == 'self-hosted' && 'self-hosted' || 'ubuntu-26.04-arm' }}
     defaults:
       run:
-        working-directory: ${{ env.REMOTE_REPOSITORY }}
+        working-directory: ${{ env.REMOTE_REPO_KEY }}
     steps:
       - name: Create source directory
         working-directory: .
@@ -444,7 +444,7 @@ jobs:
         env:
           GH_REPO: ${{ env.TARGET_REPOSITORY }}
         run: |
-          for prefix in "ccache-" "tools-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}" "toolchain-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}"; do
+          for prefix in "ccache-" "tools-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-" "toolchain-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-"; do
             echo "=== Matching caches for '$prefix' (most-recently-used first) ==="
             gh cache list --limit 100 --json id,key,lastAccessedAt --jq "map(select(.key | startswith(\"$prefix\"))) | sort_by(.lastAccessedAt) | reverse | .[] | \"\(.lastAccessedAt)  id=\(.id)  key=\(.key)\""
             echo "=== Deleting all but the newest ${{ env.KEEP_CACHES }} for '$prefix' ==="
