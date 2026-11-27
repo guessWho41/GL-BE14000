@@ -54,7 +54,7 @@ env:
   REMOTE_REPOSITORY: pesa1234/openwrt
   REMOTE_REPO_KEY: pesa1234_openwrt
   TARGET_REPOSITORY: "${{ github.repository }}"
-  KEEP_RELEASES: 3
+  KEEP_RELEASES: 5
   KEEP_CACHES: 1
 
 jobs:
