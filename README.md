@@ -3,6 +3,7 @@ GL.iNet Flint 4 (GL-BE14000) custom build with LuCi.
 Repository for building custom [OpenWrt](https://github.com/openwrt/openwrt) for GL.iNet Flint 4 (GL-BE14000) based on [Cjom's](https://forum.openwrt.org/u/cjom) [GL-MT6000 custom OpenWrt firmware builder](https://github.com/cjom/gl-mt6000) with following customizations:
 
 <!-- package-list-start -->
+- [Pesa1234's](https://forum.openwrt.org/u/pesa1234) [patches](https://github.com/pesa1234/openwrt)
 - Dropbear replaced with OpenSSH and SFTP with [hardened config](https://github.com/cjom/GL-MT6000/tree/main/files/etc/ssh) by [Cjom](https://forum.openwrt.org/u/cjom)
 - Mbed TLS relaced with OpenSSL
 - Wi-Fi UCODE scripts
