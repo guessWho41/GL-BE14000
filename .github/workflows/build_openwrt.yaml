@@ -105,14 +105,7 @@ jobs:
     name: Build OpenWrt
     needs: check_commits
     runs-on: ${{ inputs.runner_type == 'self-hosted' && 'self-hosted' || 'ubuntu-26.04-arm' }}
-    defaults:
-      run:
-        working-directory: ${{ env.REMOTE_REPO_KEY }}
     steps:
-      - name: Create source directory
-        working-directory: .
-        run: mkdir -p "$REMOTE_REPO_KEY"
-
       - name: Install dependencies #and free disk space
         if: runner.environment == 'github-hosted'
         run: |
@@ -179,7 +172,6 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: ${{ env.REMOTE_REPOSITORY }}
-          path: ${{ env.REMOTE_REPO_KEY }}
           ref: ${{ needs.check_commits.outputs.remote_branch }}
           fetch-depth: 0
           clean: ${{ !inputs.reuse_build_artifacts }}
@@ -191,17 +183,17 @@ jobs:
       - name: Checkout current repository
         uses: actions/checkout@v7
         with:
-          path: ${{ env.REMOTE_REPO_KEY }}/builder_repo
+          path: builder_repo
 
       - name: Restore host tools from cache (GitHub-hosted)
         if: runner.environment == 'github-hosted' && inputs.reuse_build_artifacts
         uses: actions/cache/restore@v6
         with:
           path: |
-            ${{ env.REMOTE_REPO_KEY }}/build_dir/host
-            ${{ env.REMOTE_REPO_KEY }}/staging_dir/host
-          key: tools-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-${{ hashFiles(format('{0}/tools/**/Makefile', env.REMOTE_REPO_KEY)) }}-${{ github.run_id }}
-          restore-keys: tools-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-${{ hashFiles(format('{0}/tools/**/Makefile', env.REMOTE_REPO_KEY)) }}-
+            build_dir/host
+            staging_dir/host
+          key: tools-${{ runner.arch }}-${{ hashFiles('tools/**/Makefile') }}-${{ github.run_id }}
+          restore-keys: tools-${{ runner.arch }}-${{ hashFiles('tools/**/Makefile') }}-
 
       - name: Refresh host tools timestamps (GitHub-hosted)
         if: runner.environment == 'github-hosted' && inputs.reuse_build_artifacts
@@ -217,10 +209,10 @@ jobs:
         uses: actions/cache/restore@v6
         with:
           path: |
-            ${{ env.REMOTE_REPO_KEY }}/build_dir/toolchain-*
-            ${{ env.REMOTE_REPO_KEY }}/staging_dir/toolchain-*
-          key: toolchain-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-${{ hashFiles(format('{0}/toolchain/**/Makefile', env.REMOTE_REPO_KEY)) }}-${{ github.run_id }}
-          restore-keys: toolchain-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-${{ hashFiles(format('{0}/toolchain/**/Makefile', env.REMOTE_REPO_KEY)) }}-
+            build_dir/toolchain-*
+            staging_dir/toolchain-*
+          key: toolchain-${{ runner.arch }}-${{ hashFiles('toolchain/**/Makefile') }}-${{ github.run_id }}
+          restore-keys: toolchain-${{ runner.arch }}-${{ hashFiles('toolchain/**/Makefile') }}-
 
       - name: Refresh toolchain timestamps (GitHub-hosted)
         if: runner.environment == 'github-hosted' && inputs.reuse_build_artifacts
@@ -247,27 +239,27 @@ jobs:
         uses: actions/checkout@v7
         with:
           repository: muink/luci-app-dnsproxy
-          path: ${{ env.REMOTE_REPO_KEY }}/package/luci-app-dnsproxy
+          path: package/luci-app-dnsproxy
 
       - name: Checkout mwan3 nftables repository
         uses: actions/checkout@v7
         with:
           repository: dl12345/mwan3
-          path: ${{ env.REMOTE_REPO_KEY }}/feeds/packages/net/mwan3
+          path: feeds/packages/net/mwan3
           ref: openwrt-25.12-beta
 
       - name: Checkout luci-app-mwan3 nftables repository
         uses: actions/checkout@v7
         with:
           repository: dl12345/luci-app-mwan3
-          path: ${{ env.REMOTE_REPO_KEY }}/feeds/luci/applications/luci-app-mwan3
+          path: feeds/luci/applications/luci-app-mwan3
           ref: openwrt-25.12-beta
 
       - name: Checkout usteer-ng
         uses: actions/checkout@v7
         with:
           repository: NilsRo/usteer-ng
-          path: ${{ env.REMOTE_REPO_KEY }}/usteer-ng
+          path: usteer-ng
           fetch-depth: 0
 
       - name: Pin usteer-ng version
@@ -355,7 +347,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: gl-be14000-firmware
-          path: ${{ env.REMOTE_REPO_KEY }}/release/*
+          path: release/*
 
       - name: Commit build artifacts
         run: |
@@ -423,9 +415,9 @@ jobs:
           ZSTD_CLEVEL: 9
         with:
           path: |
-            ${{ env.REMOTE_REPO_KEY }}/build_dir/host
-            ${{ env.REMOTE_REPO_KEY }}/staging_dir/host
-          key: tools-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-${{ hashFiles(format('{0}/tools/**/Makefile', env.REMOTE_REPO_KEY)) }}-${{ github.run_id }}
+            build_dir/host
+            staging_dir/host
+          key: tools-${{ runner.arch }}-${{ hashFiles('tools/**/Makefile') }}-${{ github.run_id }}
 
       - name: Save toolchain to cache (GitHub-hosted)
         if: runner.environment == 'github-hosted' && inputs.reuse_build_artifacts
@@ -434,16 +426,16 @@ jobs:
           ZSTD_CLEVEL: 9
         with:
           path: |
-            ${{ env.REMOTE_REPO_KEY }}/build_dir/toolchain-*
-            ${{ env.REMOTE_REPO_KEY }}/staging_dir/toolchain-*
-          key: toolchain-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-${{ hashFiles(format('{0}/toolchain/**/Makefile', env.REMOTE_REPO_KEY)) }}-${{ github.run_id }}
+            build_dir/toolchain-*
+            staging_dir/toolchain-*
+          key: toolchain-${{ runner.arch }}-${{ hashFiles('toolchain/**/Makefile') }}-${{ github.run_id }}
 
       - name: Evict old caches
         if: runner.environment == 'github-hosted'
         env:
           GH_REPO: ${{ env.TARGET_REPOSITORY }}
         run: |
-          for prefix in "ccache-" "tools-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-" "toolchain-${{ runner.arch }}-${{ env.REMOTE_REPO_KEY }}-"; do
+          for prefix in "ccache-" "tools-${{ runner.arch }}-" "toolchain-${{ runner.arch }}-"; do
             echo "=== Matching caches for '$prefix' (most-recently-used first) ==="
             gh cache list --limit 100 --json id,key,lastAccessedAt --jq "map(select(.key | startswith(\"$prefix\"))) | sort_by(.lastAccessedAt) | reverse | .[] | \"\(.lastAccessedAt)  id=\(.id)  key=\(.key)\""
             echo "=== Deleting all but the newest ${{ env.KEEP_CACHES }} for '$prefix' ==="
