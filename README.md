@@ -3,7 +3,8 @@ GL.iNet Flint 4 (GL-BE14000) custom build with LuCi.
 Repository for building custom [OpenWrt](https://github.com/openwrt/openwrt) for GL.iNet Flint 4 (GL-BE14000) based on [Cjom's](https://forum.openwrt.org/u/cjom) [GL-MT6000 custom OpenWrt firmware builder](https://github.com/cjom/gl-mt6000) with following customizations:
 
 <!-- package-list-start -->
-- [Pesa1234's](https://forum.openwrt.org/u/pesa1234) [patches](https://github.com/pesa1234/openwrt)
+- [Pesa1234's](https://forum.openwrt.org/u/pesa1234) [patches](https://github.com/pesa1234/openwrt/tree/next-r4.14.1.rss.mtk/target/linux/mediatek/patches-6.18)
+- [smp_affinity](https://github.com/guessWho41/GL-BE14000/blob/main/files/etc/init.d/smp_affinity) script based on [Pesa1234's](https://forum.openwrt.org/u/pesa1234) [advanced_setup](https://github.com/pesa1234/openwrt/blob/next-r4.14.1.rss.mtk/target/linux/mediatek/filogic/base-files/etc/init.d/advanced_setup)
 - Dropbear replaced with OpenSSH and SFTP with [hardened config](https://github.com/cjom/GL-MT6000/tree/main/files/etc/ssh) by [Cjom](https://forum.openwrt.org/u/cjom)
 - Mbed TLS relaced with OpenSSL
 - Wi-Fi UCODE scripts
