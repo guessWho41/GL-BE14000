@@ -1,0 +1,388 @@
+#!/bin/sh /etc/rc.common
+# IRQ affinity and RPS for the GL-BE14000 on upstream OpenWrt: the gl-be14000
+# part of smp_mt76() from pesa1234's advanced_setup
+# (target/linux/mediatek/filogic/base-files/etc/init.d/advanced_setup).
+#
+# Settings in /etc/config/smp, section "settings" (defaults if missing):
+#   enabled     1 (default): pin the IRQs, and set RPS as rps_type says
+#               0: do nothing
+#   rps_type    used only when network.globals.packet_steering is 0;
+#               while packet_steering is not 0 (or unset), netifd's packet
+#               steering sets RPS and this script only pins the IRQs
+#               0 (default): RPS off on every interface
+#               1: Wi-Fi interfaces on all CPUs
+#               2: bridge ports on CPU0, WAN on CPU1-3, Wi-Fi on all CPUs
+
+START=99
+USE_PROCD=1
+STARTUP_MARKER=/tmp/smp_affinity_started
+DEFAULT_STARTUP_DELAY=30
+
+extra_command "run_deferred" "Run the delayed boot-time setup"
+
+log_msg() {
+	local msg="$1"
+	logger -t smp_affinity -p daemon.notice "$msg"
+	if [ -t 1 ]; then
+		printf '%s\n' "$msg"
+	fi
+}
+log_err() {
+	local msg="$1"
+	logger -t smp_affinity -p daemon.err "$msg"
+	if [ -t 1 ]; then
+		printf '%s\n' "$msg" >&2
+	fi
+}
+
+smp_mt76() {
+CPU_LIST=`cat /proc/interrupts | sed -n '1p'`
+NUM_OF_CPU=0; for i in $CPU_LIST; do NUM_OF_CPU=`expr $NUM_OF_CPU + 1`; done;
+DEFAULT_RPS=0
+
+RPS_IF_LIST=""
+
+get_if_info()
+{
+	# try to get all wifi and eth net interface.
+	log_msg "[if_info] Fetching all ethernet and WLAN interfaces"
+	NET_IF_LIST=`ls /sys/class/net`
+	for vif in $NET_IF_LIST;
+	do
+		if [[ "$vif" == "eth"* ]] ||  \
+		[[ "$vif" == "lan"* ]] || [[ "$vif" == "wan"* ]] || \
+		[[ "$vif" == "wlan"* ]] || [[ "$vif" == "phy"* ]]; then
+			RPS_IF_LIST="$RPS_IF_LIST $vif"
+		fi
+	done;
+	log_msg "[if_info] List of RPS interfaces: $RPS_IF_LIST"
+}
+
+gl_be14000()
+{
+	num_of_wifi=$1
+	DEFAULT_RPS=0
+
+	#Physical IRQ# setting (mt7988a.dtsi: fe1 = GIC_SPI 197, fe2 = 198, pdma0-3 = 189-192)
+	#Ethernet RSS feature enables 4 Rx rings (pdma0-3)
+	eth_irq_rx0=221
+	eth_irq_rx1=222
+	eth_irq_rx2=223
+	eth_irq_rx3=224
+	eth_irq_tx=229
+	#Ethernet Rx (fe2), the only Rx IRQ when RSS is not active
+	eth_irq_rx=230
+
+	#Wi-Fi (MT7996): looked up by name, the numbers depend on how the IRQs are routed
+	wifi1_irq="name:mt7996e"
+	wifi2_irq="name:mt7996e-hif"
+	wifi3_irq=
+
+	for vif in $NET_IF_LIST;
+	do
+		if [[ "$vif" == "wlan"* ]] || [[ "$vif" == "phy"* ]] || [[ "$vif" == *"mld"* ]]; then
+			WIFI_IF_LIST="$WIFI_IF_LIST $vif"
+		fi
+	done;
+
+	# get_if_info() only collects eth*, lan*, wan*, wlan* and phy*: add the
+	# SFP port and MLO interfaces so set_rps_cpus() configures them too
+	for vif in $NET_IF_LIST;
+	do
+		case "$vif" in
+			sfp*|*mld*)
+				case " $RPS_IF_LIST " in
+					*" $vif "*) ;;
+					*) RPS_IF_LIST="$RPS_IF_LIST $vif" ;;
+				esac
+				;;
+		esac
+	done;
+
+	WAN_IF_LIST=""
+
+	for iface in $(uci show network | grep "=interface" | cut -d '.' -f 2 | cut -d '=' -f1 | sort -u); do
+		proto=$(uci get network.$iface.proto 2>/dev/null)
+		role=$(uci get network.$iface.role 2>/dev/null)
+
+		if [ "$proto" = "dhcp" ] || [ "$proto" = "pppoe" ] || [ "$role" = "wan" ]; then
+			device=$(uci get network.$iface.device 2>/dev/null)
+
+			for dev in $device; do
+				if echo "$dev" | grep -q '\.'; then
+					base_if=$(uci show network | grep "device..*name='$dev'" | cut -d. -f2 | while read devsec; do
+						uci get network.$devsec.ifname 2>/dev/null
+					done)
+
+					if [ -n "$base_if" ]; then
+						WAN_IF_LIST="$WAN_IF_LIST $base_if"
+					fi
+
+				elif [ -d "/sys/class/net/$dev" ]; then
+					WAN_IF_LIST="$WAN_IF_LIST $dev"
+
+				else
+					alias_if=$(uci get network.$dev.ifname 2>/dev/null)
+					if [ -n "$alias_if" ]; then
+						WAN_IF_LIST="$WAN_IF_LIST $alias_if"
+					fi
+				fi
+			done
+		fi
+	done
+
+	WAN_IF_LIST=$(echo "$WAN_IF_LIST" | tr ' ' '\n' | sort -u | tr '\n' ' ')
+
+	BRIDGE_MEMBERS=""
+
+	if [ -d /sys/class/net/br-lan/brif ]; then
+		for member in $(ls /sys/class/net/br-lan/brif); do
+			case "$member" in
+				wlan*|phy*|*mld*)
+					continue
+					;;
+			esac
+
+			if echo "$member" | grep -q '\.'; then
+				parent="${member%%.*}"
+				BRIDGE_MEMBERS="$BRIDGE_MEMBERS $parent"
+			else
+				BRIDGE_MEMBERS="$BRIDGE_MEMBERS $member"
+			fi
+		done
+	fi
+
+	BRIDGE_MEMBERS=$(echo $BRIDGE_MEMBERS | tr ' ' '\n' | sort -u | tr '\n' ' ')
+
+	log_msg "[smp_affinity] List of WAN interfaces: $WAN_IF_LIST"
+	log_msg "[smp_affinity] List of bridge interfaces: $BRIDGE_MEMBERS"
+	log_msg "[smp_affinity] List of WLAN interfaces: $WIFI_IF_LIST"
+
+	# Please update the CPU binding in each cases.
+	# CPU#_AFFINITY="add binding irq number here"
+	# CPU#_RPS="add binding interface name here"
+
+	# Same layout as gl_mt6000: one Ethernet RSS ring per CPU, Ethernet Tx on
+	# CPU1, the main Wi-Fi IRQ on CPU3 and the second PCIe link on CPU2.
+	# Without RSS only eth_irq_rx exists, so it shares CPU0 with eth_irq_rx0.
+	CPU0_AFFINITY="$eth_irq_rx0 $eth_irq_rx"
+	CPU1_AFFINITY="$eth_irq_rx1 $eth_irq_tx"
+	CPU2_AFFINITY="$eth_irq_rx2 $wifi2_irq $wifi3_irq"
+	CPU3_AFFINITY="$eth_irq_rx3 $wifi1_irq"
+
+	rps_type=$(uci get smp.settings.rps_type 2>/dev/null)
+	rps_type="${rps_type:-0}"
+
+	if [ "$rps_type" = "1" ]; then
+		CPU0_RPS="$WIFI_IF_LIST"
+		CPU1_RPS="$WIFI_IF_LIST"
+		CPU2_RPS="$WIFI_IF_LIST"
+		CPU3_RPS="$WIFI_IF_LIST"
+	elif  [ "$rps_type" = "2" ]; then
+		CPU0_RPS="$BRIDGE_MEMBERS $WIFI_IF_LIST"
+		CPU1_RPS="$WAN_IF_LIST $WIFI_IF_LIST"
+		CPU2_RPS="$WAN_IF_LIST $WIFI_IF_LIST"
+		CPU3_RPS="$WAN_IF_LIST $WIFI_IF_LIST"
+	fi
+}
+
+setup_model()
+{
+	board=$(board_name)
+	log_msg "[smp_affinity] Board name is $board"
+
+	if [[ $board == *"gl-be14000"* ]]; then
+		log_msg "[smp_affinity] Board model is GL-BE14000"
+		gl_be14000
+	else
+		log_msg "[smp_affinity] No CPU layout for this board"
+		return 1
+	fi
+}
+
+get_virtual_irq()
+{
+	local phy_pos=$((NUM_OF_CPU + 3))
+	local target_phy_irq="$1"
+
+	case "$target_phy_irq" in
+	name:*)
+		# Match by IRQ name, last column of /proc/interrupts
+		awk -v target="${target_phy_irq#name:}" '
+			$1 ~ /^[0-9]+:$/ && $NF == target {
+				sub(/:$/, "", $1)
+				print $1
+				exit
+			}
+		' /proc/interrupts
+		;;
+	*)
+		awk -v phy_pos="$phy_pos" -v target="$target_phy_irq" '
+			$1 ~ /^[0-9]+:$/ && $phy_pos == target {
+				sub(/:$/, "", $1)
+				print $1
+				exit
+			}
+		' /proc/interrupts
+		;;
+	esac
+}
+
+set_rps_cpu_bitmap()
+{
+	log_msg "[smp_affinity] Scanning binding interfaces of each CPU"
+	# suppose the value of interface_var is null or hex
+	num=0
+	while [ "$num" -lt "$NUM_OF_CPU" ];do
+		cpu_bit=$((2 ** $num))
+		eval rps_list=\$CPU${num}_RPS
+		log_msg "[smp_affinity] CPU$num's RPS list is: $rps_list"
+		for i in $rps_list; do
+			var=${VAR_PREFIX}_${i//'-'/_}
+			var=${var//'.'/_}
+			eval ifval=\$$var
+			if [ -z "$ifval" ]; then
+				log_msg "[smp_affinity] Current RPS value for interface $i is empty"
+				eval $var=$cpu_bit
+			else
+				log_msg "[smp_affinity] Current RPS value for interface $i is $ifval"
+				eval $var=`expr $ifval + $cpu_bit`
+			fi
+			eval ifval=\$$var
+			log_msg "[smp_affinity] New RPS value for interface $i is $ifval"
+		done
+		num=`expr $num + 1`
+	done
+}
+
+# $1: The default rps value. If rps of the interface is not setup, set $1 to it
+set_rps_cpus()
+{
+	log_msg "[smp_affinity] Setting up RPS on interfaces: $RPS_IF_LIST"
+	for i in $RPS_IF_LIST; do
+		var=${VAR_PREFIX}_${i//'-'/_}
+		var=${var//'.'/_}
+		eval cpu_map=\$$var
+		if [ -d /sys/class/net/$i ]; then
+			if [ -n "$cpu_map" ]; then
+				cpu_map=`printf '%x' $cpu_map`
+			elif [ -n "$1" ]; then
+				cpu_map="$1"
+			fi
+
+			if [ -n "$cpu_map" ]; then
+				for rxq in /sys/class/net/$i/queues/rx-*; do
+					[ -d "$rxq" ] || continue
+					log_msg "[smp_affinity] Writing $cpu_map to $rxq/rps_cpus"
+					echo $cpu_map > "$rxq/rps_cpus"
+				done
+			fi
+		fi
+	done
+}
+
+set_smp_affinity()
+{
+	log_msg "[smp_affinity] Setting up affinity of each hardware IRQ"
+	num=0
+	while [ "$num" -lt "$NUM_OF_CPU" ];do
+		eval smp_list=\$CPU${num}_AFFINITY
+		for i in $smp_list; do
+			cpu_bit=$((2 ** $num))
+			virq=$(get_virtual_irq $i)
+			if [ -z "$virq" ]; then
+				log_msg "[smp_affinity] No virtual IRQ mapped for hardware IRQ $i, skipping"
+				continue
+			fi
+
+			log_msg "[smp_affinity] Hardware IRQ $i maps to virtual IRQ $virq"
+			if ! echo "$cpu_bit" > "/proc/irq/$virq/smp_affinity"; then
+				log_err "[smp_affinity] Failed to set affinity of virtual IRQ $virq to CPU$num"
+			fi
+		done
+		num=`expr $num + 1`
+	done
+}
+
+log_msg "[smp_affinity] Setting up RPS and affinity"
+log_msg "[smp_affinity] Number of CPUs is $NUM_OF_CPU"
+VAR_PREFIX="autogen"
+get_if_info
+setup_model || return 0
+
+rps_setting=$(uci get network.globals.packet_steering 2>/dev/null)
+rps_type=$(uci get smp.settings.rps_type 2>/dev/null)
+rps_setting="${rps_setting:-1}"
+rps_type="${rps_type:-0}"
+
+if [ "$rps_setting" = "0" ]; then
+	if [ "$rps_type" != "0" ]; then
+		set_rps_cpu_bitmap
+		set_rps_cpus $DEFAULT_RPS
+	else
+		log_msg "[smp_affinity] RPS is disabled"
+		set_rps_cpus 0
+	fi
+	set_smp_affinity
+else
+	log_msg "[smp_affinity] RPS is set up by packet steering script"
+	set_smp_affinity
+	# netifd's packet steering puts RPS on the CPUs that do not take the
+	# receive IRQs, so it has to run again once they are pinned
+	[ -x /etc/init.d/packet_steering ] && /etc/init.d/packet_steering reload
+fi
+}
+
+service_triggers() {
+	procd_add_reload_trigger smp network
+}
+
+run_setup() {
+	local enabled
+
+	enabled=$(uci -q get smp.settings.enabled 2>/dev/null)
+	if [ "${enabled:-1}" = "1" ]; then
+		smp_mt76
+	else
+		log_msg "Disabled in /etc/config/smp, nothing changed"
+	fi
+	# The boot delay has passed, also when disabled, so a later reload runs at once
+	echo 1 > "$STARTUP_MARKER"
+	log_msg "Finished"
+}
+
+run_deferred() {
+	local delay="${1:-$DEFAULT_STARTUP_DELAY}"
+
+	case "$delay" in
+		''|*[!0-9]*) delay=$DEFAULT_STARTUP_DELAY ;;
+	esac
+
+	[ "$delay" -eq 0 ] || sleep "$delay"
+	log_msg "Starting"
+	run_setup
+}
+
+start_service() {
+	local delay=0
+
+	[ -f "$STARTUP_MARKER" ] || delay=$DEFAULT_STARTUP_DELAY
+	log_msg "Setup is scheduled to run in $delay seconds (non-blocking)"
+
+	procd_open_instance deferred_setup
+	procd_set_param command "$initscript" run_deferred "$delay"
+	procd_close_instance
+}
+
+reload_service() {
+	log_msg "Reloading"
+	if [ ! -f "$STARTUP_MARKER" ]; then
+		log_msg "Initial setup has not run yet, it will pick up the latest configuration"
+		return 0
+	fi
+	run_setup
+}
+
+stop_service() {
+	log_msg "No stop actions defined"
+}
