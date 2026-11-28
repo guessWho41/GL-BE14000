@@ -52,7 +52,6 @@ on:
 env:
   GH_TOKEN: ${{ github.token }}
   REMOTE_REPOSITORY: openwrt/openwrt
-  REMOTE_REPO_KEY: openwrt_openwrt
   TARGET_REPOSITORY: "${{ github.repository }}"
   KEEP_RELEASES: 5
   KEEP_CACHES: 1
