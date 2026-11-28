@@ -322,6 +322,7 @@ jobs:
           while IFS= read -r -d '' file; do
             patch -f -p1 -i "${file}"
           done < <(find builder_repo/patches -name "*.patch" -print0 | sort -z)
+          cp -v builder_repo/patches-6.18/* target/linux/mediatek/patches-6.18/
           make defconfig
 
       - name: Build firmware
