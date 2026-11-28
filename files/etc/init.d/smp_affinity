@@ -1,4 +1,8 @@
 #!/bin/sh /etc/rc.common
+
+START=99
+USE_PROCD=1
+
 # IRQ affinity and RPS for the GL-BE14000 on upstream OpenWrt: the gl-be14000
 # part of smp_mt76() from pesa1234's advanced_setup
 # (target/linux/mediatek/filogic/base-files/etc/init.d/advanced_setup).
@@ -13,8 +17,6 @@
 #               1: Wi-Fi interfaces on all CPUs
 #               2: bridge ports on CPU0, WAN on CPU1-3, Wi-Fi on all CPUs
 
-START=99
-USE_PROCD=1
 STARTUP_MARKER=/tmp/smp_affinity_started
 DEFAULT_STARTUP_DELAY=30
 
